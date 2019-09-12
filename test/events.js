@@ -125,3 +125,75 @@ test('Emit event when broker closed', function (t) {
   })
   broker.close()
 })
+
+// raw bad packet tests
+;[
+  [
+    'Invalid protocolId',
+    Buffer.from([
+      0x10, 0x18, // Fixed
+      0x00, 0x04, // Protocol name length
+      0x4d, 0x51, 0x54, 0x53, // BAD protocol name: MQTS
+      0x04, // Protocol version
+      0x02, // Connect flags (clean session)
+      0x00, 0x3c, // Keep alive
+      0x00, 0x0c, // client ID length
+      0x62, 0x61, 0x64, 0x70, 0x79, 0x2d, 0x63, 0x6c, 0x69, 0x65, 0x6e, 0x74 // client ID
+    ])
+  ],
+  [
+    'Invalid protocol version',
+    Buffer.from([
+      0x10, 0x18, // Fixed
+      0x00, 0x04, // Protocol name length
+      0x4d, 0x51, 0x54, 0x54, // Protocol name: MQTT
+      0x02, // BAD Protocol version
+      0x02, // Connect flags (clean session)
+      0x00, 0x3c, // Keep alive
+      0x00, 0x0c, // client ID length
+      0x62, 0x61, 0x64, 0x70, 0x79, 0x2d, 0x63, 0x6c, 0x69, 0x65, 0x6e, 0x74 // client ID
+    ])
+  ]
+].forEach(function (run) {
+  var message = run[0]
+  var packet = run[1]
+  test('Emit error after parsing failure ' + message, function (t) {
+    t.plan(2)
+
+    var net = require('net')
+    var instance = aedes()
+    var server = net.createServer(instance.handle)
+
+    server.listen(4883, function () {
+      console.log('listening on 4883')
+    })
+
+    instance.once('error', function () {
+      console.log('instance error')
+    })
+
+    instance.on('connectionError', function (client, err) {
+      t.equal(err.message, message)
+      t.equal(instance.connectedClients, 0)
+      finish()
+    })
+
+    var client
+
+    var timer = setTimeout(finish, 10000)
+
+    client = net.createConnection({ port: 4883 }, function () {
+      client.write(packet)
+    })
+    client.on('data', (data) => { })
+    client.on('end', () => { })
+
+    function finish () {
+      clearTimeout(timer)
+      instance.close()
+      server.close()
+      client.end()
+      t.end()
+    }
+  })
+})
